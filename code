@@ -1,0 +1,211 @@
+import pandas as pd
+
+df = pd.read_csv("wine reviews.csv")
+df.head()
+import nltk 
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import WordNetLemmatizer
+import re
+
+lemma = WordNetLemmatizer()
+stop_words = stopwords.words('english')
+
+def text_prep(x):
+     corp = str(x).lower() 
+     corp = re.sub('[^a-zA-Z]+',' ', corp).strip() 
+     tokens = word_tokenize(corp)
+     words = [t for t in tokens if t not in stop_words]
+     lemmatize = [lemma.lemmatize(w) for w in words]
+    
+     return lemmatize     
+preprocess_tag = [text_prep(i) for i in df['reviews_text']]
+df["preprocess_txt"] = preprocess_tag
+
+df['word_count'] = df['preprocess_txt'].map(lambda x: len(x))
+
+f1 = open('negative-words.txt', 'r')
+neg_words = f1.read().split()
+f2 = open('positive-words1.txt', 'r')
+pos_words = f2.read().split()
+
+num_pos = df['preprocess_txt'].map(lambda x: len([i for i in x if i in pos_words]))
+df['pos_score'] = num_pos
+num_neg = df['preprocess_txt'].map(lambda x: len([i for i in x if i in neg_words]))
+df['neg_score'] = num_neg
+
+df['polarity_score'] = (df['pos_score'] - df['neg_score']) / ((df['pos_score'] + df['neg_score']) + 0.000001)
+df['subjectivity'] = (df['pos_score'] + df['neg_score']) / (df['word_count'] + 0.000001)
+
+df['sentiment'] = round((df['pos_score'] - df['neg_score']) / (df['word_count']+ 0.000001), 2)
+
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+
+analyzer = SentimentIntensityAnalyzer()
+
+reviews = df[["ID", "name", "reviews_text", "reviews_title"]].copy()
+reviews.head()
+
+products = pd.read_csv("products.csv")
+products.head()
+
+analysis = df[["ID", "word_count", "pos_score", "neg_score", "polarity_score", "subjectivity", "sentiment"]].copy()
+analysis.head()
+
+import mysql.connector as mysql
+from mysql.connector import Error
+try:
+    conn = mysql.connect(host='localhost', database='wine_reviews', user='root', password='root')
+    if conn.is_connected():
+        cursor = conn.cursor(buffered = True)
+        cursor.execute("select database();")
+        record = cursor.fetchone()
+        print("You're connected to database: ", record)
+        
+        cursor.execute('DROP TABLE IF EXISTS analysis;')
+        cursor.execute('DROP TABLE IF EXISTS reviews;')
+        cursor.execute('DROP TABLE IF EXISTS products;')
+        
+        #TABLE 1
+        
+        print('Creating table REVIEWS')
+
+        cursor.execute("CREATE TABLE reviews(ID VARCHAR(6) PRIMARY KEY, NAME VARCHAR(100), REVIEW_TEXT text(15000), REVIEW_TITLE VARCHAR(10000))")
+        print("REVIEWS TABLE CREATED")
+        
+        for i,row in reviews.iterrows():
+             
+            sql = "INSERT INTO wine_reviews.reviews VALUES (%s,%s,%s,%s)"
+            cursor.execute(sql, tuple(row))
+            conn.commit()
+        
+        #TABLE 2
+        
+        print('Creating table PRODUCTS')
+        
+        cursor.execute("CREATE TABLE products(NAME VARCHAR(100) PRIMARY KEY, BRAND VARCHAR(100))")
+        print('PRODUCTS TABLE CREATED')
+        
+        for i,row in products.iterrows():
+            
+            sql = "INSERT INTO wine_reviews.products VALUES (%s,%s)"
+            cursor.execute(sql, tuple(row))
+            conn.commit()
+        
+        #TABLE 3
+        
+        print('Creating table ANALYSIS')
+        
+        cursor.execute("CREATE TABLE analysis(ID VARCHAR(6), word_count INT(5), pos_score FLOAT(6), neg_score FLOAT(6), polarity_score FLOAT(6), subjectivity FLOAT(6), sentiment FLOAT(6), FOREIGN KEY(ID) REFERENCES REVIEWS(ID))")
+        print('ANALYSIS TABLE CREATED')
+        
+        for i,row in analysis.iterrows():
+            
+            sql = "INSERT INTO wine_reviews.analysis VALUES (%s,%s,%s,%s,%s,%s,%s)"
+            cursor.execute(sql, tuple(row))
+            conn.commit()
+    
+except Error as e:
+            print("Error while connecting to MySQL", e)
+
+print("Successfully created all tables and inserted all records")
+
+
+print("Select Action:")
+print("1. Display all reviews")
+print("2. Display all products")
+print("3. Display all analysis")
+print("4. Insert record in reviews")
+print("5. Insert record in products")
+print("6. Display reviews grouped by Product Name")
+print("7. Display Average Word Count")
+print("8. Exit")
+
+
+#c = input("Do you want to continue? (Y/N)")
+#def menu():
+ch = int(input("Enter choice:"))
+    
+if ch == 1:
+    cursor.execute("SELECT * FROM REVIEWS;")
+    print(cursor.fetchall())
+        
+elif ch == 2:
+    cursor.execute("SELECT * FROM PRODUCTS;")
+    print(cursor.fetchall())
+        
+elif ch == 3:
+    cursor.execute("SELECT * FROM PRODUCTS;")
+    print(cursor.fetchall())
+    
+elif ch == 4:
+    id1 = input("Enter ID:")
+    name = input("Enter name:")
+    review_text = input("Enter review text:")
+    review_title = input("Enter review title:")
+    t1 = (id1, name, review_text, review_title)
+    df0 = pd.DataFrame(t1)
+    reviews.append(df0)
+    q1 = "INSERT INTO REVIEWS VALUES(%s, %s, %s, %s);"
+    print(cursor.execute(q1, tuple(t1)))
+    if name not in products["name"]:
+        brand = "na"
+        t2 = (name, brand)
+        df2 = pd.DataFrame(t2)
+        products.append(df2)
+        q2 = "INSERT INTO PRODUCTS VALUES(%s, %s);"
+        cursor.execute(q2, tuple(t2))
+        print("n p u")
+        preprocess_text1 = text_prep(review_text)
+        id1 = len(reviews["ID"])+1
+        wordcount = len(preprocess_text1)
+        pos_count1 = 0 
+        neg_count1 = 0
+        for i in preprocess_text1:
+            if i in pos_words:
+                pos_count1 += 1
+            if i in neg_words:
+                neg_count1 += 1
+            polarity = (pos_count1 - neg_count1)/((pos_count1 + neg_count1) + 0.00001)
+            subj = (pos_count1 + neg_count1) / (wordcount + 0.000001)
+            sentiment1 = round((pos_count1 + neg_count1) / (wordcount + 0.000001), 2)
+        t3 = (id1, wordcount, pos_count1, neg_count1, polarity, subj, sentiment1)
+        df3 =pd.DataFrame(t3)
+        analysis.append(df3)
+        q3 = "INSERT INTO ANALYSIS VALUES(%s, %s, %s, %s, %s, %s, %s);"
+        cursor.execute(q3, tuple(t3))
+            
+        
+elif ch == 5:
+    name = input("Enter name:")
+    name = input("Enter brand:")
+    t4 = (id1, name)
+    df4 = pd.DataFrame(t4)
+    products.append(df4)
+    q4 = "INSERT INTO PRODUCTS VALUES(%s, %s);"
+    cursor.execute(q4, tuple(t4))
+        
+elif ch == 6:
+    print(cursor.execute("SELECT PRODUCTS.NAME, REVIEW_TEXT, REVIEW_TITLE FROM REVIEWS, PRODUCTS WHERE REVIEWS.NAME = PRODUCTS.NAME GROUP BY REVIEWS.NAME;"))
+    myresult0 = cursor.fetchall()
+    for x in myresult0:
+        print(x)
+        
+elif ch == 7:
+    cursor.execute("SELECT AVG(WORD_COUNT) FROM ANALYSIS;")
+    myresult = cursor.fetchall()
+    for x in myresult:
+        print(x)
+        
+elif ch == 8:
+    print("Thank you!")
+    
+else:
+    print("Error")
+   
+    ##if c == "Y" or "y":
+#return menu()
+    
+#menu()
+
+df.head()
